@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login</title>
+    <link rel="icon" href="data:;base64,=">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .login-container {
+            width: 300px;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        input, button {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+        .secondary-action {
+            text-align: center;
+            margin-top: 10px;
+        }
+        .secondary-action a {
+            color: #007BFF;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .secondary-action a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+<div class="login-container">
+    <h3>Login</h3>
+    <form id="loginForm" onsubmit="handleLogin(event)">
+        <input type="text" id="username" placeholder="Username" required>
+        <input type="password" id="password" placeholder="Password" required>
+        <button type="submit">Login</button>
+    </form>
+    <div class="secondary-action">
+        <a href="/signup.html">Sign Up</a>
+    </div>
+</div>
+
+<script>
+    async function handleLogin(event) {
+        event.preventDefault();
+
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+
+        try {
+            const response = await fetch('http://localhost:8080/api/users/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ username, password })
+            });
+
+            if (response.ok) {
+                const token = await response.text(); // Token returned from the backend
+                console.log(token);
+                // Save the token to localStorage
+                localStorage.setItem('jwtToken', token);
+
+                // Redirect to chat.html
+                loadChatPage();
+            } else {
+                alert('Invalid login credentials');
+            }
+        } catch (error) {
+            console.error('Login error:', error);
+            alert('Error during login');
+        }
+    }
+
+    async function loadChatPage() {
+    const token = localStorage.getItem('jwtToken');
+    if (!token) {
+        alert("No token found! Redirecting to login page...");
+        window.location.href = '/index.html';
+        return;
+    }
+
+    try {
+        const response = await fetch('/chat', {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+            },
+        });
+
+        if (response.ok) {
+            const chatRes = await response.text(); // Fetch the chat.html content
+            document.open(); // Open the document for writing
+            document.write(chatRes); // Write the fetched HTML content
+            document.close();
+        } else {
+            alert('Access denied! Redirecting to login page...');
+            window.location.href = '/index.html';
+        }
+    } catch (error) {
+        console.error("Error loading chat.html:", error);
+        alert('An error occurred. Please try again.');
+        window.location.href = '/index.html';
+    }
+}
+
+
+    // Auto-redirect to chat.html if token exists and is valid
+ document.addEventListener('DOMContentLoaded', async () => {
+    const token = localStorage.getItem('jwtToken');
+    const isLoginPage = window.location.pathname === '/index.html';
+
+    // Prevent double fetch during login
+    if (token && isLoginPage) {
+        try {
+            const response = await fetch('/chat.html', {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                },
+            });
+
+            if (response.ok) {
+<!--                //window.location.href = "/chat.html";-->
+                return response.text();
+            }
+        } catch (error) {
+            console.error("Token validation error:", error);
+        }
+    }
+});
+
+</script>
+</body>
+</html>

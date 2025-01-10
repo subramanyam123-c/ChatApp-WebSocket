@@ -1,0 +1,1400 @@
+<!--<!DOCTYPE html>-->
+<!--<html lang="en">-->
+<!--<head>-->
+<!--    <meta charset="UTF-8">-->
+<!--    <meta name="viewport" content="width=device-width, initial-scale=1.0">-->
+<!--    <title>WebSocket Chat</title>-->
+<!--    <link rel="icon" href="data:;base64,=">-->
+<!--    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.2/sockjs.min.js"></script>-->
+<!--    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>-->
+<!--    <style>-->
+<!--        body {-->
+<!--            font-family: Arial, sans-serif;-->
+<!--            margin: 0;-->
+<!--            padding: 0;-->
+<!--            display: flex;-->
+<!--            height: 100vh;-->
+<!--        }-->
+<!--        #leftPanel {-->
+<!--            width: 25%;-->
+<!--            border-right: 1px solid #ccc;-->
+<!--            padding: 10px;-->
+<!--            overflow-y: auto;-->
+<!--        }-->
+<!--        #rightPanel {-->
+<!--            flex: 1;-->
+<!--            padding: 10px;-->
+<!--            display: flex;-->
+<!--            flex-direction: column;-->
+<!--            height: 100%;-->
+<!--        }-->
+<!--        #messageBox {-->
+<!--            flex: 1;-->
+<!--            border: 1px solid #ccc;-->
+<!--            padding: 10px;-->
+<!--            overflow-y: auto;-->
+<!--            margin-bottom: 10px;-->
+<!--            display: flex;-->
+<!--            flex-direction: column;-->
+<!--        }-->
+<!--        #form {-->
+<!--            display: flex;-->
+<!--            flex-direction: column;-->
+<!--            gap: 10px;-->
+<!--        }-->
+<!--        input, button {-->
+<!--            padding: 10px;-->
+<!--            font-size: 16px;-->
+<!--        }-->
+<!--        .user {-->
+<!--            padding: 10px;-->
+<!--            margin: 5px 0;-->
+<!--            border: 1px solid #ccc;-->
+<!--            cursor: pointer;-->
+<!--        }-->
+<!--        .user:hover {-->
+<!--            background-color: #f0f0f0;-->
+<!--        }-->
+<!--        .active {-->
+<!--            background-color: #d0f0ff;-->
+<!--        }-->
+<!--        .message {-->
+<!--            margin: 5px 0;-->
+<!--            padding: 10px;-->
+<!--            border-radius: 5px;-->
+<!--            max-width: 60%;-->
+<!--        }-->
+<!--        .message-left {-->
+<!--            background-color: #f1f1f1;-->
+<!--            align-self: flex-start;-->
+<!--        }-->
+<!--        .message-right {-->
+<!--            background-color: #d0f0ff;-->
+<!--            align-self: flex-end;-->
+<!--        }-->
+<!--    </style>-->
+<!--</head>-->
+<!--<body>-->
+<!--<div id="leftPanel">-->
+<!--    <h3>Active Users</h3>-->
+<!--    <div id="activeUsersBox">-->
+<!--        <p>No active users connected.</p>-->
+<!--    </div>-->
+<!--</div>-->
+<!--<div id="rightPanel">-->
+<!--    <h3 id="chatHeader">Select a user to chat</h3>-->
+<!--    <div id="messageBox"></div>-->
+<!--    <form id="form" onsubmit="sendMessage(event)">-->
+<!--        <input type="text" id="content" placeholder="Type a message" required>-->
+<!--        <button type="submit">Send Message</button>-->
+<!--    </form>-->
+<!--</div>-->
+<!--<script>-->
+<!--    let stompClient = null;-->
+<!--    let selectedUser = null;-->
+<!--    let token = null; // Store the token globally-->
+<!--    let currentUsername = null; // Store the logged-in user's username globally-->
+
+<!--    // Fetch the username from the backend-->
+<!--    async function fetchCurrentUsername() {-->
+<!--        try {-->
+<!--            const response = await fetch('http://localhost:8080/username', {-->
+<!--                method: 'GET',-->
+<!--                headers: {-->
+<!--                    'Authorization': `Bearer ${token}`-->
+<!--                }-->
+<!--            });-->
+
+<!--            if (response.ok) {-->
+<!--                const username = await response.text();-->
+<!--                console.log(`Logged-in username: ${username}`);-->
+<!--                return username;-->
+<!--            } else {-->
+<!--                console.error("Failed to fetch username. Status:", response.status);-->
+<!--                alert("Unable to determine user identity. Redirecting to login...");-->
+<!--                window.location.href = '/index.html';-->
+<!--                return null;-->
+<!--            }-->
+<!--        } catch (error) {-->
+<!--            console.error("Error fetching username:", error);-->
+<!--            alert("Unable to determine user identity. Redirecting to login...");-->
+<!--            window.location.href = '/index.html';-->
+<!--            return null;-->
+<!--        }-->
+<!--    }-->
+
+<!--    // Initialize the application-->
+<!--    async function init() {-->
+<!--        token = localStorage.getItem('jwtToken'); // Fetch token from localStorage-->
+<!--        if (!token) {-->
+<!--            alert("No token found! Redirecting to login page...");-->
+<!--            window.location.href = '/index.html'; // Redirect to login if token is missing-->
+<!--            return;-->
+<!--        }-->
+
+<!--        // Fetch the username from the backend-->
+<!--        currentUsername = await fetchCurrentUsername();-->
+<!--        if (!currentUsername) return;-->
+
+<!--        console.log(`Initialized for user: ${currentUsername}`);-->
+<!--        connect(); // Connect to WebSocket-->
+<!--    }-->
+
+<!--    // WebSocket connection function-->
+<!--    function connect() {-->
+<!--        const socketUrl = `ws://localhost:8080/ws`;-->
+<!--        console.log("Connecting to WebSocket with URL:", socketUrl);-->
+
+<!--        const socket = new WebSocket(socketUrl);-->
+<!--        stompClient = Stomp.over(socket);-->
+<!--        console.log(`Connecting with token: ${token}`);-->
+<!--        stompClient.connect(-->
+<!--            { Authorization: `Bearer ${token}` }, // Add token as a custom header-->
+<!--            () => {-->
+<!--                console.log("Connected to WebSocket server");-->
+
+<!--                // Subscribe to active users-->
+<!--                stompClient.subscribe('/topic/activeUsers', (message) => {-->
+<!--                    const activeUsers = JSON.parse(message.body);-->
+<!--                    console.log("Active users received:", activeUsers);-->
+<!--                    displayActiveUsers(activeUsers);-->
+<!--                });-->
+
+<!--                const subscriptionPath = `/user/queue/messages`;-->
+
+<!--                console.log(currentUsername+"  "+subscriptionPath);-->
+<!--                stompClient.subscribe(subscriptionPath, (message) => {-->
+<!--                    const msg = JSON.parse(message.body);-->
+<!--                    console.log("New message received:", msg);-->
+<!--                    displayMessage(msg);-->
+<!--                });-->
+<!--            },-->
+<!--            (error) => {-->
+<!--                console.error("WebSocket connection error:", error);-->
+<!--            }-->
+<!--        );-->
+<!--    }-->
+
+<!--    // Display the list of active users-->
+<!--    function displayActiveUsers(activeUsers) {-->
+<!--        const activeUsersBox = document.getElementById('activeUsersBox');-->
+<!--        activeUsersBox.innerHTML = '';-->
+<!--        activeUsers.forEach(user => {-->
+<!--            const userDiv = document.createElement('div');-->
+<!--            userDiv.classList.add('user');-->
+<!--            userDiv.textContent = user;-->
+<!--            userDiv.onclick = () => selectUser(user);-->
+<!--            activeUsersBox.appendChild(userDiv);-->
+<!--        });-->
+<!--    }-->
+
+<!--    // Select a user and load their chat history-->
+<!--    async function selectUser(username) {-->
+<!--        selectedUser = username;-->
+
+<!--        // Highlight the selected user-->
+<!--        const userElements = document.querySelectorAll('.user');-->
+<!--        userElements.forEach(userElement => userElement.classList.remove('active'));-->
+<!--        const selectedElement = Array.from(userElements).find(el => el.textContent === username);-->
+<!--        if (selectedElement) selectedElement.classList.add('active');-->
+
+<!--        // Update the chat header-->
+<!--        document.getElementById('chatHeader').textContent = `Chat with ${username}`;-->
+
+<!--        // Clear the chat messages-->
+<!--        document.getElementById('messageBox').innerHTML = '';-->
+
+<!--        // Fetch and display chat history-->
+<!--        console.log(`Fetching chat history with ${username}`);-->
+<!--        const history = await fetchChatHistory(username);-->
+<!--        console.log("Chat history loaded:", history);-->
+<!--        history.forEach(message => displayMessage(message));-->
+<!--    }-->
+
+<!--    // Fetch chat history from the backend-->
+<!--    async function fetchChatHistory(receiver) {-->
+<!--        try {-->
+<!--            const apiUrl = `http://localhost:8080/api/chat/history?receiver=${receiver}`;-->
+<!--            console.log("Fetching chat history from:", apiUrl);-->
+
+<!--            const response = await fetch(apiUrl, {-->
+<!--                method: 'GET',-->
+<!--                headers: {-->
+<!--                    'Authorization': `Bearer ${token}`-->
+<!--                }-->
+<!--            });-->
+
+<!--            if (response.ok) {-->
+<!--                const messages = await response.json();-->
+<!--                console.log("Chat history fetched:", messages);-->
+<!--                return messages;-->
+<!--            } else {-->
+<!--                console.error("Failed to fetch chat history. Status:", response.status);-->
+<!--                return [];-->
+<!--            }-->
+<!--        } catch (error) {-->
+<!--            console.error("Error fetching chat history:", error);-->
+<!--            return [];-->
+<!--        }-->
+<!--    }-->
+
+<!--    // Send a message-->
+<!--    function sendMessage(event) {-->
+<!--        event.preventDefault();-->
+
+<!--        const content = document.getElementById('content').value;-->
+
+<!--        if (!stompClient || !stompClient.connected) {-->
+<!--            alert("You are not connected to WebSocket.");-->
+<!--            return;-->
+<!--        }-->
+
+<!--        if (!selectedUser) {-->
+<!--            alert("Please select a user to chat with.");-->
+<!--            return;-->
+<!--        }-->
+<!--        console.log("receiverUsername"+" "+selectedUser);-->
+<!--        const message = {-->
+<!--            receiverUsername: selectedUser,-->
+<!--            senderUsername: currentUsername,-->
+<!--            content: content,-->
+<!--        };-->
+
+<!--        console.log("Sending message:", message);-->
+
+<!--        // Send the message using WebSocket-->
+<!--        stompClient.send("/app/chat.sendMessage", {}, JSON.stringify(message));-->
+<!--        displayMessage(message); // Show message in the chat window-->
+<!--        document.getElementById('content').value = ''; // Clear the input field-->
+<!--    }-->
+
+<!--&lt;!&ndash;    // Display a single message&ndash;&gt;-->
+<!--&lt;!&ndash;    function displayMessage(message) {&ndash;&gt;-->
+<!--&lt;!&ndash;        console.log("Displaying message:", message);&ndash;&gt;-->
+
+<!--&lt;!&ndash;        const messageBox = document.getElementById('messageBox');&ndash;&gt;-->
+<!--&lt;!&ndash;        const messageDiv = document.createElement('div');&ndash;&gt;-->
+<!--&lt;!&ndash;        messageDiv.classList.add('message');&ndash;&gt;-->
+
+<!--&lt;!&ndash;        // Determine message alignment based on sender&ndash;&gt;-->
+<!--&lt;!&ndash;        if (message.senderUsername === currentUsername) {&ndash;&gt;-->
+<!--&lt;!&ndash;            messageDiv.classList.add('message-right'); // Sent by logged-in user&ndash;&gt;-->
+<!--&lt;!&ndash;        } else {&ndash;&gt;-->
+<!--&lt;!&ndash;            messageDiv.classList.add('message-left'); // Received from another user&ndash;&gt;-->
+<!--&lt;!&ndash;        }&ndash;&gt;-->
+
+<!--&lt;!&ndash;        messageDiv.textContent = message.content;&ndash;&gt;-->
+
+<!--&lt;!&ndash;        messageBox.appendChild(messageDiv);&ndash;&gt;-->
+<!--&lt;!&ndash;        messageBox.scrollTop = messageBox.scrollHeight; // Auto-scroll to the latest message&ndash;&gt;-->
+<!--&lt;!&ndash;    }&ndash;&gt;-->
+
+<!--    // Display a single message-->
+<!--function displayMessage(message) {-->
+<!--    const messageBox = document.getElementById('messageBox');-->
+<!--    const messageDiv = document.createElement('div');-->
+<!--    messageDiv.classList.add('message');-->
+
+<!--    // Determine message alignment based on sender-->
+<!--    if (message.senderUsername === currentUsername) {-->
+<!--        messageDiv.classList.add('message-right'); // Sent by logged-in user-->
+<!--    } else {-->
+<!--        messageDiv.classList.add('message-left'); // Received from another user-->
+<!--    }-->
+
+<!--    // Format the message with the sender's name for clarity-->
+<!--    messageDiv.textContent = `${message.senderUsername}: ${message.content}`;-->
+<!--    messageDiv.title = `Message from ${message.senderUsername}`; // Tooltip for additional info-->
+
+<!--    messageBox.appendChild(messageDiv);-->
+<!--    messageBox.scrollTop = messageBox.scrollHeight; // Auto-scroll to the latest message-->
+<!--}-->
+
+
+
+<!--    // Initialize the application on page load-->
+<!--    document.addEventListener('DOMContentLoaded', () => {-->
+<!--        init();-->
+<!--    });-->
+<!--</script>-->
+<!--</body>-->
+<!--</html>-->
+<!--<!DOCTYPE html>-->
+<!--<html lang="en">-->
+<!--<head>-->
+<!--    <meta charset="UTF-8"/>-->
+<!--    <meta name="viewport" content="width=device-width,initial-scale=1.0"/>-->
+<!--    <title>WebSocket Chat</title>-->
+<!--    <link rel="icon" href="data:;base64,=">-->
+<!--    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.2/sockjs.min.js"></script>-->
+<!--    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>-->
+<!--    <style>-->
+<!--        body {-->
+<!--            font-family: Arial, sans-serif;-->
+<!--            margin: 0;-->
+<!--            padding: 0;-->
+<!--            display: flex;-->
+<!--            height: 100vh;-->
+<!--        }-->
+<!--        #leftPanel {-->
+<!--            width: 25%;-->
+<!--            border-right: 1px solid #ccc;-->
+<!--            padding: 10px;-->
+<!--            overflow-y: auto;-->
+<!--        }-->
+<!--        #rightPanel {-->
+<!--            flex: 1;-->
+<!--            padding: 10px;-->
+<!--            display: flex;-->
+<!--            flex-direction: column;-->
+<!--            height: 100%;-->
+<!--        }-->
+<!--        #messageBox {-->
+<!--            flex: 1;-->
+<!--            border: 1px solid #ccc;-->
+<!--            padding: 10px;-->
+<!--            overflow-y: auto;-->
+<!--            margin-bottom: 10px;-->
+<!--            display: flex;-->
+<!--            flex-direction: column;-->
+<!--        }-->
+<!--        #form {-->
+<!--            display: flex;-->
+<!--            flex-direction: column;-->
+<!--            gap: 10px;-->
+<!--        }-->
+<!--        input, button {-->
+<!--            padding: 10px;-->
+<!--            font-size: 16px;-->
+<!--        }-->
+<!--        .user {-->
+<!--            padding: 10px;-->
+<!--            margin: 5px 0;-->
+<!--            border: 1px solid #ccc;-->
+<!--            cursor: pointer;-->
+<!--        }-->
+<!--        .user:hover {-->
+<!--            background-color: #f0f0f0;-->
+<!--        }-->
+<!--        .active {-->
+<!--            background-color: #d0f0ff;-->
+<!--        }-->
+<!--        .message {-->
+<!--            margin: 5px 0;-->
+<!--            padding: 10px;-->
+<!--            border-radius: 5px;-->
+<!--            max-width: 60%;-->
+<!--        }-->
+<!--        .message-left {-->
+<!--            background-color: #f1f1f1;-->
+<!--            align-self: flex-start;-->
+<!--        }-->
+<!--        .message-right {-->
+<!--            background-color: #d0f0ff;-->
+<!--            align-self: flex-end;-->
+<!--        }-->
+<!--    </style>-->
+<!--</head>-->
+<!--<body>-->
+<!--<div id="leftPanel">-->
+<!--    <h3>Active Users</h3>-->
+<!--    <div id="activeUsersBox">-->
+<!--        <p>No active users connected.</p>-->
+<!--    </div>-->
+<!--</div>-->
+<!--<div id="rightPanel">-->
+<!--    <h3 id="chatHeader">Select a user to chat</h3>-->
+<!--    <div id="messageBox"></div>-->
+<!--    <form id="form" onsubmit="sendMessage(event)">-->
+<!--        <input type="text" id="content" placeholder="Type a message" required>-->
+<!--        <button type="submit">Send Message</button>-->
+<!--    </form>-->
+<!--</div>-->
+
+<!--<script>-->
+<!--    let stompClient = null;-->
+<!--    let selectedUser = null;-->
+<!--    let token = null;               // Store the token globally-->
+<!--    let currentUsername = null;     // Store the logged-in user's username globally-->
+
+<!--    // NEW: Holds the conversation messages keyed by the other username-->
+<!--    // Example: messagesByUser["alice"] = array of messages between me and alice-->
+<!--    let messagesByUser = {};-->
+
+<!--    // Fetch the username from the backend-->
+<!--    async function fetchCurrentUsername() {-->
+<!--        try {-->
+<!--            const response = await fetch('http://localhost:8080/username', {-->
+<!--                method: 'GET',-->
+<!--                headers: {-->
+<!--                    'Authorization': `Bearer ${token}`-->
+<!--                }-->
+<!--            });-->
+
+<!--            if (response.ok) {-->
+<!--                const username = await response.text();-->
+<!--                console.log(`Logged-in username: ${username}`);-->
+<!--                return username;-->
+<!--            } else {-->
+<!--                console.error("Failed to fetch username. Status:", response.status);-->
+<!--                alert("Unable to determine user identity. Redirecting to login...");-->
+<!--                window.location.href = '/index.html';-->
+<!--                return null;-->
+<!--            }-->
+<!--        } catch (error) {-->
+<!--            console.error("Error fetching username:", error);-->
+<!--            alert("Unable to determine user identity. Redirecting to login...");-->
+<!--            window.location.href = '/index.html';-->
+<!--            return null;-->
+<!--        }-->
+<!--    }-->
+
+<!--    // Initialize the application-->
+<!--    async function init() {-->
+<!--        token = localStorage.getItem('jwtToken'); // Fetch token from localStorage-->
+<!--        if (!token) {-->
+<!--            alert("No token found! Redirecting to login page...");-->
+<!--            window.location.href = '/index.html'; // Redirect to login if token is missing-->
+<!--            return;-->
+<!--        }-->
+
+<!--        // Fetch the username from the backend-->
+<!--        currentUsername = await fetchCurrentUsername();-->
+<!--        if (!currentUsername) return;-->
+
+<!--        console.log(`Initialized for user: ${currentUsername}`);-->
+<!--        connect(); // Connect to WebSocket-->
+<!--    }-->
+
+<!--    // WebSocket connection function-->
+<!--    function connect() {-->
+<!--        const socketUrl = `ws://localhost:8080/ws`;-->
+<!--        console.log("Connecting to WebSocket with URL:", socketUrl);-->
+
+<!--        const socket = new WebSocket(socketUrl);-->
+<!--        stompClient = Stomp.over(socket);-->
+
+<!--        console.log(`Connecting with token: ${token}`);-->
+<!--        stompClient.connect(-->
+<!--            { Authorization: `Bearer ${token}` }, // Add token as a custom header-->
+<!--            () => {-->
+<!--                console.log("Connected to WebSocket server");-->
+
+<!--                // Subscribe to active users-->
+<!--&lt;!&ndash;                stompClient.subscribe('/topic/activeUsers', (message) => {&ndash;&gt;-->
+<!--&lt;!&ndash;                    const activeUsers = JSON.parse(message.body);&ndash;&gt;-->
+<!--&lt;!&ndash;                    console.log("Active users received:", activeUsers);&ndash;&gt;-->
+<!--&lt;!&ndash;                    displayActiveUsers(activeUsers);&ndash;&gt;-->
+<!--&lt;!&ndash;                });&ndash;&gt;-->
+
+<!--                // Personal subscription for receiving messages-->
+<!--                const subscriptionPath = `/user/queue/messages`;-->
+<!--                console.log(currentUsername + "  " + subscriptionPath);-->
+
+<!--                stompClient.subscribe(subscriptionPath, (message) => {-->
+<!--                    const msg = JSON.parse(message.body);-->
+<!--                    console.log("New message received:", msg);-->
+<!--                    storeAndDisplayMessage(msg);-->
+<!--                });-->
+<!--            },-->
+<!--            (error) => {-->
+<!--                console.error("WebSocket connection error:", error);-->
+<!--            }-->
+<!--        );-->
+<!--    }-->
+
+<!--    // Display the list of active users-->
+<!--    function displayActiveUsers(activeUsers) {-->
+<!--        const activeUsersBox = document.getElementById('activeUsersBox');-->
+<!--        activeUsersBox.innerHTML = '';-->
+
+<!--        if (activeUsers.length === 0) {-->
+<!--            activeUsersBox.innerHTML = '<p>No active users connected.</p>';-->
+<!--            return;-->
+<!--        }-->
+
+<!--        activeUsers.forEach(user => {-->
+<!--            // Don't list the current user as an active user to chat with themselves-->
+<!--            if (user === currentUsername) {-->
+<!--                return;-->
+<!--            }-->
+<!--            const userDiv = document.createElement('div');-->
+<!--            userDiv.classList.add('user');-->
+<!--            userDiv.textContent = user;-->
+<!--            userDiv.onclick = () => selectUser(user);-->
+<!--            activeUsersBox.appendChild(userDiv);-->
+<!--        });-->
+<!--    }-->
+
+<!--    // Select a user and load their chat history-->
+<!--    async function selectUser(username) {-->
+<!--        selectedUser = username;-->
+
+<!--        // Highlight the selected user-->
+<!--        const userElements = document.querySelectorAll('.user');-->
+<!--        userElements.forEach(userElement => userElement.classList.remove('active'));-->
+
+<!--        const selectedElement = Array.from(userElements).find(el => el.textContent === username);-->
+<!--        if (selectedElement) {-->
+<!--            selectedElement.classList.add('active');-->
+<!--        }-->
+
+<!--        // Update the chat header-->
+<!--        document.getElementById('chatHeader').textContent = `Chat with ${username}`;-->
+
+<!--        // Clear the chat display-->
+<!--        const messageBox = document.getElementById('messageBox');-->
+<!--        messageBox.innerHTML = '';-->
+
+<!--        // Fetch and store chat history from backend-->
+<!--        // so we have an up-to-date record for messagesByUser.-->
+<!--        console.log(`Fetching chat history with ${username}`);-->
+<!--        const history = await fetchChatHistory(username);-->
+
+<!--        // Overwrite or initialize messages for this user in our in-memory store-->
+<!--        messagesByUser[username] = history;-->
+
+<!--        // Now display the messages from the user you selected-->
+<!--        renderMessagesForSelectedUser();-->
+<!--    }-->
+
+<!--    // Fetch chat history from the backend-->
+<!--    async function fetchChatHistory(receiver) {-->
+<!--        try {-->
+<!--            const apiUrl = `http://localhost:8080/api/chat/history?receiver=${receiver}`;-->
+<!--            console.log("Fetching chat history from:", apiUrl);-->
+
+<!--            const response = await fetch(apiUrl, {-->
+<!--                method: 'GET',-->
+<!--                headers: {-->
+<!--                    'Authorization': `Bearer ${token}`-->
+<!--                }-->
+<!--            });-->
+
+<!--            if (response.ok) {-->
+<!--                const messages = await response.json();-->
+<!--                console.log("Chat history fetched:", messages);-->
+<!--                return messages;-->
+<!--            } else {-->
+<!--                console.error("Failed to fetch chat history. Status:", response.status);-->
+<!--                return [];-->
+<!--            }-->
+<!--        } catch (error) {-->
+<!--            console.error("Error fetching chat history:", error);-->
+<!--            return [];-->
+<!--        }-->
+<!--    }-->
+
+<!--    // Send a message-->
+<!--    function sendMessage(event) {-->
+<!--        event.preventDefault();-->
+<!--        const content = document.getElementById('content').value;-->
+
+<!--        if (!stompClient || !stompClient.connected) {-->
+<!--            alert("You are not connected to WebSocket.");-->
+<!--            return;-->
+<!--        }-->
+<!--        if (!selectedUser) {-->
+<!--            alert("Please select a user to chat with.");-->
+<!--            return;-->
+<!--        }-->
+
+<!--        const message = {-->
+<!--            receiverUsername: selectedUser,-->
+<!--            senderUsername: currentUsername,-->
+<!--            content: content-->
+<!--        };-->
+
+<!--        console.log("Sending message:", message);-->
+
+<!--        // Send the message using WebSocket-->
+<!--        stompClient.send("/app/chat.sendMessage", {}, JSON.stringify(message));-->
+
+<!--        // Locally store and display it (so it appears right away)-->
+<!--        storeAndDisplayMessage(message);-->
+
+<!--        // Clear the input field-->
+<!--        document.getElementById('content').value = '';-->
+<!--    }-->
+
+<!--    /**-->
+<!--     * Stores incoming or outgoing messages in messagesByUser and then-->
+<!--     * re-renders if the message belongs to the currently selectedUser.-->
+<!--     */-->
+<!--    function storeAndDisplayMessage(message) {-->
+<!--        // Figure out the other user in this conversation-->
+<!--        // If I'm the sender, the other user is the receiver.-->
+<!--        // If I'm not the sender, I'm the receiver, so the other user is the sender.-->
+<!--        const otherUser = (message.senderUsername === currentUsername)-->
+<!--            ? message.receiverUsername-->
+<!--            : message.senderUsername;-->
+
+<!--        // Make sure there's an array for this user-->
+<!--        if (!messagesByUser[otherUser]) {-->
+<!--            messagesByUser[otherUser] = [];-->
+<!--        }-->
+
+<!--        // Push the new message-->
+<!--        messagesByUser[otherUser].push(message);-->
+
+<!--        // If this otherUser is the one currently selected, render the new message-->
+<!--        if (selectedUser === otherUser) {-->
+<!--            addMessageToChatWindow(message);-->
+<!--        }-->
+<!--    }-->
+
+<!--    /**-->
+<!--     * Renders the entire conversation for the selected user.-->
+<!--     */-->
+<!--    function renderMessagesForSelectedUser() {-->
+<!--        const messageBox = document.getElementById('messageBox');-->
+<!--        messageBox.innerHTML = '';-->
+
+<!--        // If no user is selected or no stored messages, do nothing-->
+<!--        if (!selectedUser || !messagesByUser[selectedUser]) {-->
+<!--            return;-->
+<!--        }-->
+
+<!--        // Display all messages we have for the selected user-->
+<!--        messagesByUser[selectedUser].forEach(msg => {-->
+<!--            addMessageToChatWindow(msg);-->
+<!--        });-->
+<!--    }-->
+
+<!--    /**-->
+<!--     * Adds a single message div to the #messageBox (chat window).-->
+<!--     */-->
+<!--    function addMessageToChatWindow(message) {-->
+<!--        const messageBox = document.getElementById('messageBox');-->
+<!--        const messageDiv = document.createElement('div');-->
+<!--        messageDiv.classList.add('message');-->
+
+<!--        if (message.senderUsername === currentUsername) {-->
+<!--            // My own (outgoing) message-->
+<!--            messageDiv.classList.add('message-right');-->
+<!--        } else {-->
+<!--            // Incoming message from someone else-->
+<!--            messageDiv.classList.add('message-left');-->
+<!--        }-->
+
+<!--        // Show "sender: content" for clarity-->
+<!--        messageDiv.textContent = `${message.content}`;-->
+
+<!--        // Optional tooltip-->
+<!--        messageDiv.title = `Message from ${message.senderUsername}`;-->
+
+<!--        messageBox.appendChild(messageDiv);-->
+<!--        // Auto-scroll to the latest message-->
+<!--        messageBox.scrollTop = messageBox.scrollHeight;-->
+<!--    }-->
+
+<!--    // Initialize the application on page load-->
+<!--    document.addEventListener('DOMContentLoaded', () => {-->
+<!--        init();-->
+<!--    });-->
+<!--</script>-->
+<!--</body>-->
+<!--</html>-->
+
+<!--<!DOCTYPE html>-->
+<!--<html lang="en">-->
+<!--<head>-->
+<!--    <meta charset="UTF-8"/>-->
+<!--    <meta name="viewport" content="width=device-width,initial-scale=1.0"/>-->
+<!--    <title>WebSocket Chat</title>-->
+<!--    <link rel="icon" href="data:;base64,=">-->
+<!--    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.2/sockjs.min.js"></script>-->
+<!--    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>-->
+<!--    <style>-->
+<!--        body {-->
+<!--            font-family: Arial, sans-serif;-->
+<!--            margin: 0;-->
+<!--            padding: 0;-->
+<!--            display: flex;-->
+<!--            height: 100vh;-->
+<!--        }-->
+<!--        #leftPanel {-->
+<!--            width: 25%;-->
+<!--            border-right: 1px solid #ccc;-->
+<!--            padding: 10px;-->
+<!--            overflow-y: auto;-->
+<!--        }-->
+<!--        #rightPanel {-->
+<!--            flex: 1;-->
+<!--            padding: 10px;-->
+<!--            display: flex;-->
+<!--            flex-direction: column;-->
+<!--            height: 100%;-->
+<!--        }-->
+<!--        #messageBox {-->
+<!--            flex: 1;-->
+<!--            border: 1px solid #ccc;-->
+<!--            padding: 10px;-->
+<!--            overflow-y: auto;-->
+<!--            margin-bottom: 10px;-->
+<!--            display: flex;-->
+<!--            flex-direction: column;-->
+<!--        }-->
+<!--        #form {-->
+<!--            display: flex;-->
+<!--            flex-direction: column;-->
+<!--            gap: 10px;-->
+<!--        }-->
+<!--        input, button {-->
+<!--            padding: 10px;-->
+<!--            font-size: 16px;-->
+<!--        }-->
+<!--        .user {-->
+<!--            padding: 10px;-->
+<!--            margin: 5px 0;-->
+<!--            border: 1px solid #ccc;-->
+<!--            cursor: pointer;-->
+<!--            display: flex;-->
+<!--            align-items: center;-->
+<!--        }-->
+<!--        .user:hover {-->
+<!--            background-color: #f0f0f0;-->
+<!--        }-->
+<!--        .active {-->
+<!--            background-color: #d0f0ff;-->
+<!--        }-->
+<!--        .status-dot {-->
+<!--            display: inline-block;-->
+<!--            width: 10px;-->
+<!--            height: 10px;-->
+<!--            margin-right: 10px;-->
+<!--            border-radius: 50%;-->
+<!--        }-->
+<!--        .online {-->
+<!--            background-color: green;-->
+<!--        }-->
+<!--        .offline {-->
+<!--            background-color: transparent;-->
+<!--        }-->
+<!--        .message {-->
+<!--            margin: 5px 0;-->
+<!--            padding: 10px;-->
+<!--            border-radius: 5px;-->
+<!--            max-width: 60%;-->
+<!--        }-->
+<!--        .message-left {-->
+<!--            background-color: #f1f1f1;-->
+<!--            align-self: flex-start;-->
+<!--        }-->
+<!--        .message-right {-->
+<!--            background-color: #d0f0ff;-->
+<!--            align-self: flex-end;-->
+<!--        }-->
+<!--    </style>-->
+<!--</head>-->
+<!--<body>-->
+<!--<div id="leftPanel">-->
+<!--    <h3>All Users</h3>-->
+<!--    <div id="activeUsersBox">-->
+<!--        <p>No users found.</p>-->
+<!--    </div>-->
+<!--</div>-->
+<!--<div id="rightPanel">-->
+<!--    <h3 id="chatHeader">Select a user to chat</h3>-->
+<!--    <div id="messageBox"></div>-->
+<!--    <form id="form" onsubmit="sendMessage(event)">-->
+<!--        <input type="text" id="content" placeholder="Type a message" required>-->
+<!--        <button type="submit">Send Message</button>-->
+<!--    </form>-->
+<!--</div>-->
+
+<!--<script>-->
+<!--    let stompClient = null;-->
+<!--    let selectedUser = null;-->
+<!--    let token = null;-->
+<!--    let currentUsername = null;-->
+<!--    let messagesByUser = {};-->
+<!--    let unreadMessages = {};-->
+<!--    async function fetchCurrentUsername() {-->
+<!--        try {-->
+<!--            const response = await fetch('http://localhost:8080/username', {-->
+<!--                method: 'GET',-->
+<!--                headers: { 'Authorization': `Bearer ${token}` }-->
+<!--            });-->
+<!--            if (response.ok) {-->
+<!--                const username = await response.text();-->
+<!--                return username;-->
+<!--            } else {-->
+<!--                alert("Unable to determine user identity. Redirecting to login...");-->
+<!--                window.location.href = '/index.html';-->
+<!--                return null;-->
+<!--            }-->
+<!--        } catch (error) {-->
+<!--            console.error("Error fetching username:", error);-->
+<!--            alert("Unable to determine user identity. Redirecting to login...");-->
+<!--            window.location.href = '/index.html';-->
+<!--            return null;-->
+<!--        }-->
+<!--    }-->
+
+<!--    async function fetchAllUsers() {-->
+<!--        try {-->
+<!--            const response = await fetch('http://localhost:8080/api/users', {-->
+<!--                method: 'GET',-->
+<!--                headers: { 'Authorization': `Bearer ${token}` }-->
+<!--            });-->
+<!--            if (response.ok) {-->
+<!--                const users = await response.json();-->
+<!--                displayUsers(users);-->
+<!--            } else {-->
+<!--                console.error("Failed to fetch users. Status:", response.status);-->
+<!--            }-->
+<!--        } catch (error) {-->
+<!--            console.error("Error fetching users:", error);-->
+<!--        }-->
+<!--    }-->
+
+<!--    function displayUsers(users) {-->
+<!--        const activeUsersBox = document.getElementById('activeUsersBox');-->
+<!--        activeUsersBox.innerHTML = '';-->
+
+<!--        users.forEach(user => {-->
+<!--            const userDiv = document.createElement('div');-->
+<!--            userDiv.classList.add('user');-->
+
+<!--            const statusDot = document.createElement('span');-->
+<!--            statusDot.classList.add('status-dot');-->
+<!--            if (user.status === 'online') {-->
+<!--                statusDot.classList.add('online');-->
+<!--            } else {-->
+<!--                statusDot.classList.add('offline');-->
+<!--            }-->
+
+<!--            userDiv.appendChild(statusDot);-->
+<!--            userDiv.appendChild(document.createTextNode(user.username));-->
+<!--            userDiv.onclick = () => selectUser(user.username);-->
+<!--            activeUsersBox.appendChild(userDiv);-->
+<!--        });-->
+<!--    }-->
+
+<!--    function connect() {-->
+<!--        const socketUrl = `ws://localhost:8080/ws`;-->
+<!--        const socket = new WebSocket(socketUrl);-->
+<!--        stompClient = Stomp.over(socket);-->
+
+<!--        stompClient.connect(-->
+<!--            { Authorization: `Bearer ${token}` },-->
+<!--            () => {-->
+<!--                stompClient.subscribe('/topic/userStatus', (message) => {-->
+<!--                    const userStatus = JSON.parse(message.body);-->
+<!--                    updateUserStatus(userStatus);-->
+<!--                });-->
+
+<!--                stompClient.subscribe('/user/queue/messages', (message) => {-->
+<!--                    const msg = JSON.parse(message.body);-->
+<!--                    storeAndDisplayMessage(msg);-->
+<!--                });-->
+<!--            },-->
+<!--            (error) => console.error("WebSocket connection error:", error)-->
+<!--        );-->
+<!--    }-->
+
+<!--    function updateUserStatus(userStatus) {-->
+<!--        const userDivs = document.querySelectorAll('.user');-->
+<!--        userDivs.forEach(userDiv => {-->
+<!--            if (userDiv.textContent.trim() === userStatus.username) {-->
+<!--                const statusDot = userDiv.querySelector('.status-dot');-->
+<!--                if (userStatus.status === 'online') {-->
+<!--                    statusDot.classList.add('online');-->
+<!--                    statusDot.classList.remove('offline');-->
+<!--                } else {-->
+<!--                    statusDot.classList.add('offline');-->
+<!--                    statusDot.classList.remove('online');-->
+<!--                }-->
+<!--            }-->
+<!--        });-->
+<!--    }-->
+
+<!--    async function selectUser(username) {-->
+<!--        selectedUser = username;-->
+
+<!--        const userElements = document.querySelectorAll('.user');-->
+<!--        userElements.forEach(userElement => userElement.classList.remove('active'));-->
+
+<!--        const selectedElement = Array.from(userElements).find(el => el.textContent === username);-->
+<!--        if (selectedElement) selectedElement.classList.add('active');-->
+
+<!--        document.getElementById('chatHeader').textContent = `Chat with ${username}`;-->
+<!--        document.getElementById('messageBox').innerHTML = '';-->
+
+<!--        const history = await fetchChatHistory(username);-->
+<!--        messagesByUser[username] = history;-->
+<!--        renderMessagesForSelectedUser();-->
+<!--    }-->
+
+<!--    async function fetchChatHistory(receiver) {-->
+<!--        try {-->
+<!--            const response = await fetch(`http://localhost:8080/api/chat/history?receiver=${receiver}`, {-->
+<!--                method: 'GET',-->
+<!--                headers: { 'Authorization': `Bearer ${token}` }-->
+<!--            });-->
+<!--            if (response.ok) {-->
+<!--                return await response.json();-->
+<!--            } else {-->
+<!--                return [];-->
+<!--            }-->
+<!--        } catch (error) {-->
+<!--            return [];-->
+<!--        }-->
+<!--    }-->
+
+<!--    function sendMessage(event) {-->
+<!--        event.preventDefault();-->
+<!--        const content = document.getElementById('content').value;-->
+
+<!--        if (!stompClient || !selectedUser) {-->
+<!--            alert("Please select a user to chat with.");-->
+<!--            return;-->
+<!--        }-->
+
+<!--        const message = {-->
+<!--            receiverUsername: selectedUser,-->
+<!--            senderUsername: currentUsername,-->
+<!--            content: content-->
+<!--        };-->
+
+<!--        stompClient.send("/app/chat.sendMessage", {}, JSON.stringify(message));-->
+<!--        storeAndDisplayMessage(message);-->
+<!--        document.getElementById('content').value = '';-->
+<!--    }-->
+
+<!--    function storeAndDisplayMessage(message) {-->
+<!--        const otherUser = message.senderUsername === currentUsername ? message.receiverUsername : message.senderUsername;-->
+
+<!--        if (!messagesByUser[otherUser]) {-->
+<!--            messagesByUser[otherUser] = [];-->
+<!--        }-->
+<!--        messagesByUser[otherUser].push(message);-->
+
+<!--        if (selectedUser === otherUser) {-->
+<!--            addMessageToChatWindow(message);-->
+<!--        }-->
+<!--    }-->
+
+<!--    function renderMessagesForSelectedUser() {-->
+<!--        const messageBox = document.getElementById('messageBox');-->
+<!--        messageBox.innerHTML = '';-->
+
+<!--        if (!selectedUser || !messagesByUser[selectedUser]) return;-->
+
+<!--        messagesByUser[selectedUser].forEach(msg => addMessageToChatWindow(msg));-->
+<!--    }-->
+
+<!--    function addMessageToChatWindow(message) {-->
+<!--        const messageBox = document.getElementById('messageBox');-->
+<!--        const messageDiv = document.createElement('div');-->
+<!--        messageDiv.classList.add('message');-->
+
+<!--        if (message.senderUsername === currentUsername) {-->
+<!--            messageDiv.classList.add('message-right');-->
+<!--        } else {-->
+<!--            messageDiv.classList.add('message-left');-->
+<!--        }-->
+
+<!--        messageDiv.textContent = `${message.content}`;-->
+<!--        messageBox.appendChild(messageDiv);-->
+<!--        messageBox.scrollTop = messageBox.scrollHeight;-->
+<!--    }-->
+
+<!--    async function init() {-->
+<!--        token = localStorage.getItem('jwtToken');-->
+<!--        if (!token) {-->
+<!--            alert("No token found! Redirecting to login...");-->
+<!--            window.location.href = '/index.html';-->
+<!--            return;-->
+<!--        }-->
+
+<!--        currentUsername = await fetchCurrentUsername();-->
+<!--        if (!currentUsername) return;-->
+
+<!--        connect();-->
+<!--        await fetchAllUsers();-->
+<!--    }-->
+
+<!--    document.addEventListener('DOMContentLoaded', () => {-->
+<!--        init();-->
+<!--    });-->
+<!--</script>-->
+<!--</body>-->
+<!--</html>-->
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+    <title>WebSocket Chat</title>
+    <link rel="icon" href="data:;base64,=">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.2/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+        }
+        #leftPanel {
+            width: 25%;
+            border-right: 1px solid #ccc;
+            padding: 10px;
+            overflow-y: auto;
+        }
+        #rightPanel {
+            flex: 1;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        #messageBox {
+            flex: 1;
+            border: 1px solid #ccc;
+            padding: 10px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            display: flex;
+            flex-direction: column;
+        }
+        #form {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        input, button {
+            padding: 10px;
+            font-size: 16px;
+        }
+        .user {
+            padding: 10px;
+            margin: 5px 0;
+            border: 1px solid #ccc;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .user:hover {
+            background-color: #f0f0f0;
+        }
+        .active {
+            background-color: #d0f0ff;
+        }
+        .status-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            margin-right: 10px;
+            border-radius: 50%;
+        }
+        .online {
+            background-color: green;
+        }
+        .offline {
+            background-color: transparent;
+        }
+        .badge {
+            background-color: red;
+            color: white;
+            border-radius: 50%;
+            padding: 3px 6px;
+            font-size: 12px;
+            margin-left: 8px;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 60%;
+        }
+        .message-left {
+            background-color: #f1f1f1;
+            align-self: flex-start;
+        }
+        .message-right {
+            background-color: #d0f0ff;
+            align-self: flex-end;
+        }
+    </style>
+</head>
+<body>
+<div id="leftPanel">
+    <h3>All Users</h3>
+    <div id="activeUsersBox">
+        <p>No users found.</p>
+    </div>
+</div>
+<div id="rightPanel">
+    <h3 id="chatHeader">Select a user to chat</h3>
+    <div id="messageBox"></div>
+    <form id="form" onsubmit="sendMessage(event)">
+        <input type="text" id="content" placeholder="Type a message" required>
+        <button type="submit">Send Message</button>
+    </form>
+</div>
+
+<script>
+    let stompClient = null;
+    let selectedUser = null;
+    let token = null;
+    let currentUsername = null;
+    let messagesByUser = {};
+    let unreadMessages = {}; // Keeps track of unread messages for each user
+
+    async function fetchCurrentUsername() {
+        try {
+            const response = await fetch('http://localhost:8080/username', {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (response.ok) {
+                const username = await response.text();
+                return username;
+            } else {
+                alert("Unable to determine user identity. Redirecting to login...");
+                window.location.href = '/index.html';
+                return null;
+            }
+        } catch (error) {
+            console.error("Error fetching username:", error);
+            alert("Unable to determine user identity. Redirecting to login...");
+            window.location.href = '/index.html';
+            return null;
+        }
+    }
+
+    async function fetchAllUsers() {
+        try {
+            const response = await fetch('http://localhost:8080/api/users', {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (response.ok) {
+                const users = await response.json();
+                displayUsers(users);
+            } else {
+                console.error("Failed to fetch users. Status:", response.status);
+            }
+        } catch (error) {
+            console.error("Error fetching users:", error);
+        }
+    }
+
+    function displayUsers(users) {
+        const activeUsersBox = document.getElementById('activeUsersBox');
+        activeUsersBox.innerHTML = '';
+
+        users.forEach(user => {
+            const userDiv = document.createElement('div');
+            userDiv.classList.add('user');
+            userDiv.setAttribute('data-username', user.username);
+
+            const statusDot = document.createElement('span');
+            statusDot.classList.add('status-dot');
+            if (user.status === 'online') {
+                statusDot.classList.add('online');
+            } else {
+                statusDot.classList.add('offline');
+            }
+
+            const badge = document.createElement('span');
+            badge.classList.add('badge');
+            badge.style.display = 'none'; // Initially hidden
+
+            userDiv.appendChild(statusDot);
+            userDiv.appendChild(document.createTextNode(user.username));
+            userDiv.appendChild(badge);
+
+            userDiv.onclick = () => selectUser(user.username);
+            activeUsersBox.appendChild(userDiv);
+        });
+    }
+
+    function connect() {
+        const socketUrl = `ws://localhost:8080/ws`;
+        const socket = new WebSocket(socketUrl);
+        stompClient = Stomp.over(socket);
+
+        stompClient.connect(
+            { Authorization: `Bearer ${token}` },
+            () => {
+                stompClient.subscribe('/topic/userStatus', (message) => {
+                    const userStatus = JSON.parse(message.body);
+                    updateUserStatus(userStatus);
+                });
+
+                stompClient.subscribe('/user/queue/messages', (message) => {
+                    const msg = JSON.parse(message.body);
+                    handleIncomingMessage(msg);
+                });
+            },
+            (error) => console.error("WebSocket connection error:", error)
+        );
+    }
+
+    function updateUserStatus(userStatus) {
+        const userDivs = document.querySelectorAll('.user');
+        userDivs.forEach(userDiv => {
+            if (userDiv.getAttribute('data-username') === userStatus.username) {
+                const statusDot = userDiv.querySelector('.status-dot');
+                if (userStatus.status === 'online') {
+                    statusDot.classList.add('online');
+                    statusDot.classList.remove('offline');
+                } else {
+                    statusDot.classList.add('offline');
+                    statusDot.classList.remove('online');
+                }
+            }
+        });
+    }
+
+    function handleIncomingMessage(message) {
+        const sender = message.senderUsername;
+        if (selectedUser !== sender) {
+            unreadMessages[sender] = (unreadMessages[sender] || 0) + 1;
+            updateUnreadBadge(sender);
+        } else {
+            addMessageToChatWindow(message);
+        }
+    }
+
+    function updateUnreadBadge(sender) {
+        const userDiv = document.querySelector(`.user[data-username="${sender}"]`);
+        if (userDiv) {
+            const badge = userDiv.querySelector('.badge');
+            if (unreadMessages[sender] > 0) {
+                badge.textContent = unreadMessages[sender];
+                badge.style.display = 'inline-block'; // Show badge
+            } else {
+                badge.style.display = 'none'; // Hide badge if count is 0
+            }
+        }
+    }
+
+
+    async function selectUser(username) {
+        selectedUser = username;
+
+        const userElements = document.querySelectorAll('.user');
+        userElements.forEach(userElement => userElement.classList.remove('active'));
+
+        const selectedElement = document.querySelector(`.user[data-username="${username}"]`);
+        if (selectedElement) {
+            selectedElement.classList.add('active');
+        }
+
+        document.getElementById('chatHeader').textContent = `Chat with ${username}`;
+        document.getElementById('messageBox').innerHTML = '';
+
+        unreadMessages[username] = 0; // Reset unread messages
+        updateUnreadBadge(username); // Hide the badge
+
+        const history = await fetchChatHistory(username);
+        messagesByUser[username] = history;
+        renderMessagesForSelectedUser();
+    }
+
+    async function fetchChatHistory(receiver) {
+        try {
+            const response = await fetch(`http://localhost:8080/api/chat/history?receiver=${receiver}`, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (response.ok) {
+                return await response.json();
+            } else {
+                return [];
+            }
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function sendMessage(event) {
+        event.preventDefault();
+        const content = document.getElementById('content').value;
+
+        if (!stompClient || !selectedUser) {
+            alert("Please select a user to chat with.");
+            return;
+        }
+
+        const message = {
+            receiverUsername: selectedUser,
+            senderUsername: currentUsername,
+            content: content
+        };
+
+        stompClient.send("/app/chat.sendMessage", {}, JSON.stringify(message));
+        storeAndDisplayMessage(message);
+        document.getElementById('content').value = '';
+    }
+
+    function storeAndDisplayMessage(message) {
+        const otherUser = message.senderUsername === currentUsername ? message.receiverUsername : message.senderUsername;
+
+        if (!messagesByUser[otherUser]) {
+            messagesByUser[otherUser] = [];
+        }
+        messagesByUser[otherUser].push(message);
+
+        if (selectedUser === otherUser) {
+            addMessageToChatWindow(message);
+        }
+    }
+
+    function renderMessagesForSelectedUser() {
+        const messageBox = document.getElementById('messageBox');
+        messageBox.innerHTML = '';
+
+        if (!selectedUser || !messagesByUser[selectedUser]) return;
+
+        messagesByUser[selectedUser].forEach(msg => addMessageToChatWindow(msg));
+    }
+
+    function addMessageToChatWindow(message) {
+        const messageBox = document.getElementById('messageBox');
+        const messageDiv = document.createElement('div');
+        messageDiv.classList.add('message');
+
+        if (message.senderUsername === currentUsername) {
+            messageDiv.classList.add('message-right');
+        } else {
+            messageDiv.classList.add('message-left');
+        }
+
+        messageDiv.textContent = `${message.content}`;
+        messageBox.appendChild(messageDiv);
+        messageBox.scrollTop = messageBox.scrollHeight;
+    }
+
+    async function init() {
+        token = localStorage.getItem('jwtToken');
+        if (!token) {
+            alert("No token found! Redirecting to login...");
+            window.location.href = '/index.html';
+            return;
+        }
+
+        currentUsername = await fetchCurrentUsername();
+        if (!currentUsername) return;
+
+        connect();
+        await fetchAllUsers();
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        init();
+    });
+</script>
+</body>
+</html>
+
